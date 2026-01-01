@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, PuantajEntry, UserRole, EntryType } from '../types';
 import { db } from '../services/supabaseService';
-import { Coffee, Banknote, ShoppingBag, Trash2, Calendar, Edit2, X, Check, HandCoins, RefreshCw, Plus, ClipboardList, AlertTriangle, Copy, Check as CheckIcon, AlertCircle, Settings2 } from 'lucide-react';
+import { Coffee, Banknote, ShoppingBag, Trash2, Calendar, Edit2, X, Check, HandCoins, RefreshCw, ClipboardList, AlertTriangle, Check as CheckIcon, AlertCircle, Settings2 } from 'lucide-react';
 
 interface Props {
   users: User[];
@@ -30,17 +30,32 @@ const AdminPuantaj: React.FC<Props> = ({ users, entries, setEntries }) => {
   const [errorInfo, setErrorInfo] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   
-  // Sabit ücret ayarları
-  const [config5K, setConfig5K] = useState(() => localStorage.getItem('config5K') || '500');
-  const [config8K, setConfig8K] = useState(() => localStorage.getItem('config8K') || '800');
+  // Sabit ücret ayarları - Artık DB'den gelecek
+  const [config5K, setConfig5K] = useState('500');
+  const [config8K, setConfig8K] = useState('800');
 
   useEffect(() => {
-    localStorage.setItem('config5K', config5K);
-  }, [config5K]);
+    const loadSettings = async () => {
+      try {
+        const settings = await db.getSettings();
+        if (settings.config5K) setConfig5K(settings.config5K);
+        if (settings.config8K) setConfig8K(settings.config8K);
+      } catch (e) {
+        console.error("Ayarlar yüklenemedi kanka", e);
+      }
+    };
+    loadSettings();
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem('config8K', config8K);
-  }, [config8K]);
+  const updateSetting = async (key: string, value: string) => {
+    if (key === 'config5K') setConfig5K(value);
+    if (key === 'config8K') setConfig8K(value);
+    try {
+      await db.upsertSetting(key, value);
+    } catch (e) {
+      console.error("Ayar kaydedilemedi kanka", e);
+    }
+  };
 
   const formatDisplayDate = (isoDate: string) => {
     if (!isoDate) return '';
@@ -124,8 +139,6 @@ const AdminPuantaj: React.FC<Props> = ({ users, entries, setEntries }) => {
     setBusy(true);
     setErrorInfo(null);
     try {
-      // 5K Butonu -> config5K TL ekler, 8 Saat mesai sayar
-      // 8K Butonu -> config8K TL ekler, 5 Saat mesai sayar
       const amount = type === '8H' ? parseFloat(config5K) : parseFloat(config8K);
       const newEntry: PuantajEntry = {
         id: Math.random().toString(36).substr(2, 9),
@@ -152,8 +165,6 @@ const AdminPuantaj: React.FC<Props> = ({ users, entries, setEntries }) => {
   };
 
   const todaysEntries = entries.filter(e => e.date === selectedDate);
-
-  // Modal'da saat girişi gösterilsin mi? (Sadece Özel Giriş'te kalsın)
   const showHoursInModal = modal.type === 'CUSTOM';
 
   return (
@@ -187,7 +198,6 @@ const AdminPuantaj: React.FC<Props> = ({ users, entries, setEntries }) => {
         </div>
       )}
 
-      {/* Üst Ayarlar ve Tarih Barı */}
       <div className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4">
         <div className="flex-1 flex flex-col sm:flex-row gap-4 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
           <div className="flex items-center gap-6">
@@ -210,17 +220,16 @@ const AdminPuantaj: React.FC<Props> = ({ users, entries, setEntries }) => {
           </div>
         </div>
 
-        {/* Ücret Ayarları */}
         <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex items-center gap-4">
           <div className="p-3 bg-slate-50 rounded-xl text-slate-400"><Settings2 size={20} /></div>
           <div className="grid grid-cols-2 gap-4">
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-indigo-500 uppercase">5K:</span>
-              <input type="number" className="pl-10 pr-3 py-2 bg-slate-50 rounded-lg outline-none font-black text-xs w-24 border border-transparent focus:border-indigo-500" value={config5K} onChange={e => setConfig5K(e.target.value)} />
+              <input type="number" className="pl-10 pr-3 py-2 bg-slate-50 rounded-lg outline-none font-black text-xs w-24 border border-transparent focus:border-indigo-500" value={config5K} onChange={e => updateSetting('config5K', e.target.value)} />
             </div>
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-sky-500 uppercase">8K:</span>
-              <input type="number" className="pl-10 pr-3 py-2 bg-slate-50 rounded-lg outline-none font-black text-xs w-24 border border-transparent focus:border-sky-500" value={config8K} onChange={e => setConfig8K(e.target.value)} />
+              <input type="number" className="pl-10 pr-3 py-2 bg-slate-50 rounded-lg outline-none font-black text-xs w-24 border border-transparent focus:border-sky-500" value={config8K} onChange={e => updateSetting('config8K', e.target.value)} />
             </div>
           </div>
         </div>

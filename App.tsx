@@ -5,9 +5,10 @@ import AdminPersonnel from './components/AdminPersonnel';
 import AdminPuantaj from './components/AdminPuantaj';
 import AdminReports from './components/AdminReports';
 import AdminTips from './components/AdminTips';
+import AdminAccounting from './components/AdminAccounting';
 import StaffPortal from './components/StaffPortal';
 import { db } from './services/supabaseService';
-import { Users, ClipboardList, BarChart3, LogOut, Briefcase, RefreshCw, KeyRound, Eye, EyeOff, X, ArrowRight, Coins, LayoutDashboard } from 'lucide-react';
+import { Users, ClipboardList, BarChart3, LogOut, Briefcase, RefreshCw, KeyRound, Eye, EyeOff, X, ArrowRight, Coins, LayoutDashboard, Calculator } from 'lucide-react';
 
 interface Bubble {
   id: number;
@@ -15,7 +16,7 @@ interface Bubble {
   y: number;
 }
 
-type TabType = 'personnel' | 'puantaj' | 'reports' | 'tips' | 'portal';
+type TabType = 'personnel' | 'puantaj' | 'reports' | 'tips' | 'portal' | 'accounting';
 
 const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -153,7 +154,7 @@ const App: React.FC = () => {
 
         {/* Password Modal */}
         {selectedUserForLogin && (
-          <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[200] flex items-center justify-center p-6 animate-in fade-in">
+          <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-xl z-[9999] flex items-center justify-center p-6 animate-in fade-in">
             <div className={`bg-white rounded-[2.5rem] p-10 max-w-sm w-full shadow-2xl transition-all ${loginError ? 'animate-bounce' : ''}`}>
               <div className="flex justify-between items-start mb-6">
                 <div className="flex items-center gap-4">
@@ -211,7 +212,8 @@ const App: React.FC = () => {
         </div>
       ))}
 
-      <nav className="w-full lg:w-80 bg-white border-b lg:border-r border-slate-100 flex flex-col lg:sticky lg:top-0 lg:h-screen z-[100] shrink-0">
+      {/* Navigasyon z-index z-10 yapıldı */}
+      <nav className="w-full lg:w-80 bg-white border-b lg:border-r border-slate-100 flex flex-col lg:sticky lg:top-0 lg:h-screen z-10 shrink-0">
         <div className="p-6 lg:p-10">
           <h2 className="text-xl lg:text-2xl font-black flex items-center gap-3 text-slate-800">
             <div className="bg-indigo-600 p-2 rounded-xl shadow-lg shadow-indigo-100"><Briefcase className="text-white w-5 h-5 lg:w-6 lg:h-6" /></div>
@@ -239,6 +241,15 @@ const App: React.FC = () => {
                 <ClipboardList className="w-5 h-5 shrink-0" />
                 <span className="font-bold text-xs lg:text-base">Puantaj</span>
               </button>
+              
+              <button
+                onClick={() => setActiveTab('accounting')}
+                className={`flex-1 lg:w-full flex items-center justify-center lg:justify-start gap-3 px-4 py-3 lg:py-4 rounded-2xl transition-all whitespace-nowrap ${activeTab === 'accounting' ? 'bg-emerald-600 text-white shadow-xl shadow-emerald-100' : 'text-slate-500 hover:bg-slate-50 font-bold'}`}
+              >
+                <Calculator className="w-5 h-5 shrink-0" />
+                <span className="font-bold text-xs lg:text-base">Ön Muhasebe</span>
+              </button>
+
               <button
                 onClick={() => setActiveTab('personnel')}
                 className={`flex-1 lg:w-full flex items-center justify-center lg:justify-start gap-3 px-4 py-3 lg:py-4 rounded-2xl transition-all whitespace-nowrap ${activeTab === 'personnel' ? 'bg-slate-900 text-white shadow-xl shadow-slate-200' : 'text-slate-500 hover:bg-slate-50 font-bold'}`}
@@ -246,6 +257,7 @@ const App: React.FC = () => {
                 <Users className="w-5 h-5 shrink-0" />
                 <span className="font-bold text-xs lg:text-base">Personel</span>
               </button>
+              
               <button
                 onClick={() => setActiveTab('reports')}
                 className={`flex-1 lg:w-full flex items-center justify-center lg:justify-start gap-3 px-4 py-3 lg:py-4 rounded-2xl transition-all whitespace-nowrap ${activeTab === 'reports' ? 'bg-slate-900 text-white shadow-xl shadow-slate-200' : 'text-slate-500 hover:bg-slate-50 font-bold'}`}
@@ -256,7 +268,6 @@ const App: React.FC = () => {
             </>
           )}
 
-          {/* Bahşiş Artık Herkese Açık */}
           <button
             onClick={() => setActiveTab('tips')}
             className={`flex-1 lg:w-full flex items-center justify-center lg:justify-start gap-3 px-4 py-3 lg:py-4 rounded-2xl transition-all whitespace-nowrap ${activeTab === 'tips' ? 'bg-amber-500 text-white shadow-xl shadow-amber-100' : 'text-slate-500 hover:bg-slate-50 font-bold'}`}
@@ -284,7 +295,8 @@ const App: React.FC = () => {
         </div>
       </nav>
 
-      <main className="flex-1 p-4 md:p-6 lg:p-12 lg:overflow-y-auto lg:h-screen custom-scrollbar mobile-scroll-fix">
+      {/* Main katmanı z-20 yapılarak modallar için uygun temel katman sağlandı */}
+      <main className="flex-1 p-4 md:p-6 lg:p-12 lg:overflow-y-auto lg:h-screen custom-scrollbar mobile-scroll-fix z-20 relative">
         {activeTab === 'portal' && currentUser.role === UserRole.STAFF && (
           <StaffPortal user={currentUser} entries={entries} setUser={(updatedUser) => {
             setCurrentUser(updatedUser);
@@ -295,6 +307,7 @@ const App: React.FC = () => {
         {activeTab === 'puantaj' && currentUser.role === UserRole.ADMIN && <AdminPuantaj users={users} entries={entries} setEntries={setEntries} />}
         {activeTab === 'reports' && currentUser.role === UserRole.ADMIN && <AdminReports users={users} entries={entries} />}
         {activeTab === 'tips' && <AdminTips users={users} entries={entries} setEntries={setEntries} />}
+        {activeTab === 'accounting' && currentUser.role === UserRole.ADMIN && <AdminAccounting />}
       </main>
     </div>
   );

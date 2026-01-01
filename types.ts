@@ -20,11 +20,16 @@ export interface PuantajEntry {
   userId: string;
   type: EntryType;
   amount: number;
-  hours?: number; // Bahşiş dağıtımı için gerekli olan saat bilgisi
+  hours?: number;
   date: string;
   note?: string;
 }
 
+// --- Dashboard Tipleri ---
+
+/**
+ * Interface used by Dashboard.tsx component to represent daily attendance records.
+ */
 export interface AttendanceRecord {
   id: string;
   userId: string;
@@ -32,8 +37,28 @@ export interface AttendanceRecord {
   status: 'present' | 'absent' | 'leave' | 'sick';
   entryTime?: string;
   exitTime?: string;
-  overtime?: number;
-  notes?: string;
+  overtime: number;
+}
+
+// --- Ön Muhasebe Tipleri ---
+
+export type AccTransactionType = 'PURCHASE' | 'PAYMENT';
+
+export interface Wholesaler {
+  id: string;
+  name: string;
+  phone?: string;
+  contactPerson?: string;
+}
+
+export interface AccTransaction {
+  id: string;
+  wholesalerId: string;
+  type: AccTransactionType;
+  amount: number;
+  date: string;
+  dueDate?: string;
+  note?: string;
 }
 
 export interface AppState {

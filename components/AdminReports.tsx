@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { User, PuantajEntry, UserRole } from '../types';
 import { db } from '../services/supabaseService';
-import { ShieldCheck, User as UserIcon, ChevronLeft, ChevronRight, MessageSquare, BarChart3, Calendar as CalendarIcon, Download, Upload, RefreshCw, Wallet, TrendingUp, ReceiptText } from 'lucide-react';
+import { BarChart3, ChevronLeft, ChevronRight, MessageSquare, Calendar as CalendarIcon, Download, Upload, RefreshCw, Scale, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 
 interface Props {
   users: User[];
@@ -53,12 +53,18 @@ const AdminReports: React.FC<Props> = ({ users, entries }) => {
 
   const staffBalances = useMemo(() => {
     return users.map(user => {
-      // ÖNEMLİ: Bahşişleri bakiye hesabına katmıyoruz!
       const userEntries = entries.filter(e => e.userId === user.id && e.type !== 'TIP');
       const balance = userEntries.reduce((acc, curr) => acc + curr.amount, 0);
       return { ...user, balance };
     }).sort((a, b) => b.balance - a.balance);
   }, [users, entries]);
+
+  const shopSummary = useMemo(() => {
+    const totalReceivables = staffBalances.filter(b => b.balance > 0).reduce((acc, curr) => acc + curr.balance, 0);
+    const totalPayables = staffBalances.filter(b => b.balance < 0).reduce((acc, curr) => acc + Math.abs(curr.balance), 0);
+    const netBalance = totalReceivables - totalPayables;
+    return { totalReceivables, totalPayables, netBalance };
+  }, [staffBalances]);
 
   const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
   const firstDayOfMonth = new Date(currentCalendarDate.getFullYear(), currentCalendarDate.getMonth(), 1).getDay();
@@ -70,7 +76,6 @@ const AdminReports: React.FC<Props> = ({ users, entries }) => {
   const monthStats = useMemo(() => {
     const filtered = selectedUserEntries.filter(e => {
       const d = new Date(e.date);
-      // Raporlarda da bahşişleri maaş/avans dengesinden ayırıyoruz
       return d.getMonth() === currentCalendarDate.getMonth() && d.getFullYear() === currentCalendarDate.getFullYear() && e.type !== 'TIP';
     });
     const income = filtered.filter(e => e.amount > 0).reduce((acc, curr) => acc + curr.amount, 0);
@@ -86,7 +91,7 @@ const AdminReports: React.FC<Props> = ({ users, entries }) => {
             <BarChart3 className="text-white w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">Dükkan Alacakları</h2>
+            <h2 className="text-2xl md:text-3xl font-black text-slate-800 tracking-tight">Raporlar & Analiz</h2>
             <div className="flex items-center gap-4 mt-1">
               <button onClick={handleExport} disabled={busy} className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-widest text-indigo-500 hover:text-indigo-700">
                 <Download size={12} /> Snapshot İndir
@@ -113,47 +118,49 @@ const AdminReports: React.FC<Props> = ({ users, entries }) => {
       </div>
 
       {selectedUser === 'all' ? (
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden animate-in slide-in-from-bottom-4">
-          <div className="p-8 border-b border-slate-50">
-            <h3 className="text-xl font-black text-slate-800 flex items-center gap-3">
-              <span className="w-1.5 h-6 bg-indigo-600 rounded-full" />
-              Güncel Maaş/Avans Dengesi
-            </h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                <tr>
-                  <th className="px-6 md:px-10 py-5">Personel</th>
-                  <th className="hidden md:table-cell px-10 py-5 text-center">Yetki</th>
-                  <th className="px-6 md:px-10 py-5 text-right">Maaş Bakiyesi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {staffBalances.map(staff => (
-                  <tr key={staff.id} className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-6 md:px-10 py-5">
-                      <div className="flex items-center gap-3 md:gap-4">
-                        <img src={staff.avatar} className="w-8 h-8 md:w-10 md:h-10 rounded-xl bg-slate-50" />
-                        <div>
-                          <p className="font-black text-slate-700 text-sm md:text-base">{staff.name}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="hidden md:table-cell px-10 py-5 text-center">
-                      <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${staff.role === UserRole.ADMIN ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
-                        {staff.role}
-                      </span>
-                    </td>
-                    <td className="px-6 md:px-10 py-5 text-right font-black text-base md:text-lg">
-                      <span className={staff.balance > 0 ? 'text-emerald-600' : staff.balance < 0 ? 'text-red-600' : 'text-slate-400'}>
-                        {staff.balance.toLocaleString()} TL
-                      </span>
-                    </td>
+        <div className="space-y-8 animate-in slide-in-from-bottom-4">
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <div className="p-8 border-b border-slate-50">
+              <h3 className="text-xl font-black text-slate-800 flex items-center gap-3">
+                <span className="w-1.5 h-6 bg-indigo-600 rounded-full" />
+                Güncel Maaş/Avans Dengesi
+              </h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left">
+                <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  <tr>
+                    <th className="px-6 md:px-10 py-5">Personel</th>
+                    <th className="hidden md:table-cell px-10 py-5 text-center">Yetki</th>
+                    <th className="px-6 md:px-10 py-5 text-right">Maaş Bakiyesi</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {staffBalances.map(staff => (
+                    <tr key={staff.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-6 md:px-10 py-5">
+                        <div className="flex items-center gap-3 md:gap-4">
+                          <img src={staff.avatar} className="w-8 h-8 md:w-10 md:h-10 rounded-xl bg-slate-50" />
+                          <div>
+                            <p className="font-black text-slate-700 text-sm md:text-base">{staff.name}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="hidden md:table-cell px-10 py-5 text-center">
+                        <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase ${staff.role === UserRole.ADMIN ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {staff.role}
+                        </span>
+                      </td>
+                      <td className="px-6 md:px-10 py-5 text-right font-black text-base md:text-lg">
+                        <span className={staff.balance > 0 ? 'text-emerald-600' : staff.balance < 0 ? 'text-red-600' : 'text-slate-400'}>
+                          {staff.balance.toLocaleString()} TL
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       ) : (
@@ -247,6 +254,32 @@ const AdminReports: React.FC<Props> = ({ users, entries }) => {
           </div>
         </div>
       )}
+
+      {/* GENEL MAĞAZA ÖZETİ - Sayfanın en altında her zaman görünür */}
+      <div className="bg-slate-900 p-8 md:p-12 rounded-[3rem] text-white shadow-2xl relative overflow-hidden mt-12">
+        <div className="absolute top-0 right-0 p-12 opacity-10"><Scale size={160} /></div>
+        <h3 className="text-2xl font-black mb-10 flex items-center gap-4">
+           <span className="w-2 h-8 bg-indigo-500 rounded-full" />
+           Genel Mağaza Dengesi (Puantaj Pro)
+        </h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+          <div className="space-y-3">
+            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ArrowUpRight size={16} className="text-emerald-400" /> Toplam Personel Alacağı</p>
+            <p className="text-4xl font-black text-emerald-400">{shopSummary.totalReceivables.toLocaleString()} <span className="text-xl">TL</span></p>
+            <p className="text-[11px] text-slate-500 font-bold italic">Mağazanın tüm personele olan toplam borcu.</p>
+          </div>
+          <div className="space-y-3">
+            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><ArrowDownLeft size={16} className="text-red-400" /> Toplam Personel Borcu</p>
+            <p className="text-4xl font-black text-red-400">{shopSummary.totalPayables.toLocaleString()} <span className="text-xl">TL</span></p>
+            <p className="text-[11px] text-slate-500 font-bold italic">Personellerin dükkandan aldığı net avans toplamı.</p>
+          </div>
+          <div className="space-y-3 bg-white/5 p-8 rounded-[2.5rem] border border-white/10 shadow-inner">
+            <p className="text-[11px] font-black text-indigo-300 uppercase tracking-widest">Net Mağaza Personel Yükü</p>
+            <p className="text-5xl font-black text-white">{shopSummary.netBalance.toLocaleString()} <span className="text-2xl">TL</span></p>
+            <p className="text-[11px] text-slate-400 font-bold italic">Ödenmesi gereken net personel tutarı.</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
