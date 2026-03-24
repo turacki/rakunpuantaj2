@@ -1,0 +1,80 @@
+
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Puantaj Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      // Browser ortamında process.env hatasını engellemek için shim
+      window.process = window.process || { env: { API_KEY: '' } };
+    </script>
+    <style>
+        body { 
+          font-family: 'Plus Jakarta Sans', sans-serif; 
+          overflow-x: hidden;
+          margin: 0;
+          padding: 0;
+        }
+
+        .animate-in {
+          animation-duration: 0.3s;
+          animation-fill-mode: forwards;
+        }
+        @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes zoom-in-95 { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        @keyframes slide-in-from-bottom-4 { from { opacity: 0; transform: translateY(1rem); } to { opacity: 1; transform: translateY(0); } }
+        
+        /* Yeni Saçılan Balon Animasyonu - Ölçek 1.0 yapıldı (2 kat büyüdü) */
+        @keyframes scatter-up {
+          0% {
+            transform: translateY(0) scale(1.0);
+            opacity: 0;
+          }
+          20% {
+            opacity: 1;
+          }
+          100% {
+            transform: translateY(-110vh) translateX(calc(-150px + 300px * var(--rnd))) rotate(calc(var(--rnd) * 40deg - 20deg));
+            opacity: 0;
+          }
+        }
+
+        .bubble-effect {
+          position: fixed;
+          bottom: -60px;
+          left: 50%;
+          transform: translateX(-50%);
+          pointer-events: none;
+          z-index: 9999;
+          animation: scatter-up 4s cubic-bezier(0.2, 0, 0.4, 1) forwards;
+          white-space: nowrap;
+          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        .fade-in { animation-name: fade-in; }
+        .zoom-in-95 { animation-name: zoom-in-95; }
+        .slide-in-from-bottom-4 { animation-name: slide-in-from-bottom-4; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+        
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        @media (max-width: 1024px) {
+          .mobile-scroll-fix {
+            overflow: visible !important;
+            height: auto !important;
+          }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
+</body>
+</html>
