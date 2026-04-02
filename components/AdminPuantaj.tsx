@@ -1,0 +1,711 @@
+
+import React, { useState, useEffect } from 'react';
+import { User, PuantajEntry, UserRole, EntryType } from '../types';
+import { db, getLocalDateString } from '../services/supabaseService';
+import { adisyoService } from '../services/adisyoService';
+import { Coffee, Banknote, ShoppingBag, Trash2, Calendar, Edit2, X, Check, HandCoins, RefreshCw, ClipboardList, AlertTriangle, Check as CheckIcon, AlertCircle, Settings2, Send, CheckCircle2, Plus, Search, Save, UserPlus, EyeOff } from 'lucide-react';
+
+interface Props {
+  users: User[];
+  entries: PuantajEntry[];
+  setEntries: React.Dispatch<React.SetStateAction<PuantajEntry[]>>;
+}
+
+interface ModalState {
+  isOpen: boolean;
+  userId: string;
+  type: EntryType;
+  entryId?: string;
+  amount: string;
+  hours: string;
+  note: string;
+  title: string;
+  excludeFromTotals: boolean;
+}
+
+const AdminPuantaj: React.FC<Props> = ({ users, entries, setEntries }) => {
+  const [selectedDate, setSelectedDate] = useState(getLocalDateString());
+  const [modal, setModal] = useState<ModalState>({ 
+    isOpen: false, userId: '', type: 'CUSTOM', amount: '', hours: '', note: '', title: '', excludeFromTotals: false
+  });
+  const [busy, setBusy] = useState(false);
+  const [errorInfo, setErrorInfo] = useState<string | null>(null);
+  const [successInfo, setSuccessInfo] = useState<string | null>(null);
+  const [adisyoDebug, setAdisyoDebug] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  
+  const [config5K, setConfig5K] = useState('500');
+  const [config8K, setConfig8K] = useState('800');
+  const [configChef5K, setConfigChef5K] = useState('700');
+  const [configChef8K, setConfigChef8K] = useState('1000');
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [draftRows, setDraftRows] = useState<{ userId: string, type: '5H' | '8H' }[]>([]);
+  const [defaultShiftType, setDefaultShiftType] = useState<'5H' | '8H'>('8H');
+
+  // Arka plan kaymasını ve zıplamasını engelleme
+  useEffect(() => {
+    const isModalOpen = modal.isOpen || deleteConfirmId;
+    const scrollContainer = document.querySelector('main');
+    
+    if (isModalOpen) {
+      document.body.style.overflow = 'hidden';
+      if (scrollContainer) scrollContainer.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+      if (scrollContainer) scrollContainer.style.overflow = '';
+    }
+    
+    return () => {
+      document.body.style.overflow = '';
+      if (scrollContainer) scrollContainer.style.overflow = '';
+    };
+  }, [modal.isOpen, deleteConfirmId]);
+
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await db.getSettings();
+        if (settings.config5K) setConfig5K(settings.config5K);
+        if (settings.config8K) setConfig8K(settings.config8K);
+        if (settings.configChef5K) setConfigChef5K(settings.configChef5K);
+        if (settings.configChef8K) setConfigChef8K(settings.configChef8K);
+      } catch (e) {
+        console.error("Ayarlar yüklenemedi", e);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const updateSetting = async (key: string, value: string) => {
+    if (key === 'config5K') setConfig5K(value);
+    if (key === 'config8K') setConfig8K(value);
+    if (key === 'configChef5K') setConfigChef5K(value);
+    if (key === 'configChef8K') setConfigChef8K(value);
+    try {
+      await db.upsertSetting(key, value);
+    } catch (e) {
+      console.error("Ayar kaydedilemedi", e);
+    }
+  };
+
+  const formatDisplayDate = (isoDate: string) => {
+    if (!isoDate) return '';
+    const [y, m, d] = isoDate.split('-');
+    return `${d}/${m}/${y}`;
+  };
+
+  const titles = ["Ozan'a Kaydı", "PİÇİ SOY!"];
+
+  const openModal = (userId: string, type: EntryType, entry?: PuantajEntry) => {
+    const randomTitle = titles[Math.floor(Math.random() * titles.length)];
+    setModal({
+      isOpen: true,
+      userId,
+      type,
+      entryId: entry?.id,
+      amount: entry ? Math.abs(entry.amount).toString() : '',
+      hours: entry?.hours ? entry.hours.toString() : '',
+      note: entry?.note || (
+        type === 'EXPENSE' ? 'Harcama' : 
+        type === 'PAYMENT' ? 'Ödeme' : 
+        type === '5H' ? '5 Saat Mesai' : 
+        type === '8H' ? '8 Saat Tam Gün' : 'Ek Mesai / Prim'
+      ),
+      title: randomTitle,
+      excludeFromTotals: entry?.excludeFromTotals || false
+    });
+  };
+
+  const handleModalSubmit = async () => {
+    const rawAmount = parseFloat(modal.amount);
+    const rawHours = parseFloat(modal.hours);
+    if (isNaN(rawAmount)) return;
+
+    setBusy(true);
+    setErrorInfo(null);
+    try {
+      const isDeduction = modal.type === 'EXPENSE' || modal.type === 'PAYMENT';
+      const finalAmount = isDeduction ? -Math.abs(rawAmount) : Math.abs(rawAmount);
+
+      const entryId = modal.entryId || `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+      const entryToSave: PuantajEntry = {
+        id: entryId,
+        userId: modal.userId,
+        type: modal.type,
+        amount: finalAmount,
+        hours: isNaN(rawHours) ? undefined : rawHours,
+        date: selectedDate,
+        note: modal.note || '',
+        excludeFromTotals: modal.excludeFromTotals
+      };
+
+      await db.upsertEntry(entryToSave);
+
+      if (modal.entryId) {
+        setEntries(prev => prev.map(e => e.id === modal.entryId ? entryToSave : e));
+      } else {
+        // Double check if entry already exists in state to prevent duplicates from double clicks
+        setEntries(prev => {
+          if (prev.some(e => e.id === entryToSave.id)) return prev;
+          return [...prev, entryToSave];
+        });
+      }
+      setModal({ ...modal, isOpen: false });
+    } catch (err: any) {
+      setErrorInfo(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const executeDelete = async (id: string) => {
+    setBusy(true);
+    setErrorInfo(null);
+    try {
+      await db.deleteEntry(id);
+      setEntries(prev => prev.filter(e => e.id !== id));
+      setDeleteConfirmId(null);
+    } catch (err: any) {
+      setErrorInfo(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const quickEntry = async (userId: string, type: EntryType, note: string, hours: number) => {
+    setBusy(true);
+    setErrorInfo(null);
+    try {
+      const user = users.find(u => u.id === userId);
+      const isChef = user?.department === 'CHEF';
+      
+      let amount = 0;
+      if (type === '8H') {
+        amount = isChef ? parseFloat(configChef5K) : parseFloat(config5K);
+      } else if (type === '5H') {
+        amount = isChef ? parseFloat(configChef8K) : parseFloat(config8K);
+      }
+
+      const newEntry: PuantajEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        userId,
+        type,
+        amount,
+        hours, 
+        date: selectedDate,
+        note
+      };
+      await db.upsertEntry(newEntry);
+      setEntries(prev => [...prev, newEntry]);
+    } catch (err: any) {
+      setErrorInfo(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAddFromPool = (userId: string) => {
+    // Eğer zaten taslakta varsa ekleme (isteğe bağlı, aynı kişiye 2 shift yazılabilir mi?)
+    // Kullanıcı aynı kişiye hem 5k hem 8k yazmak isteyebilir, o yüzden engellemiyorum.
+    setDraftRows(prev => [...prev, { userId, type: defaultShiftType }]);
+  };
+
+  const handleRowChange = (index: number, field: 'userId' | 'type', value: string) => {
+    const newRows = [...draftRows];
+    newRows[index] = { ...newRows[index], [field]: value as any };
+    setDraftRows(newRows);
+  };
+
+  const handleRemoveRow = (index: number) => {
+    setDraftRows(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSaveDrafts = async () => {
+    const validRows = draftRows.filter(r => r.userId);
+    if (validRows.length === 0) return;
+    
+    setBusy(true);
+    setErrorInfo(null);
+    try {
+      const newEntries: PuantajEntry[] = [];
+      for (const row of validRows) {
+        const user = users.find(u => u.id === row.userId);
+        const isChef = user?.department === 'CHEF';
+        
+        let amount = 0;
+        if (row.type === '8H') {
+          amount = isChef ? parseFloat(configChef5K) : parseFloat(config5K);
+        } else if (row.type === '5H') {
+          amount = isChef ? parseFloat(configChef8K) : parseFloat(config8K);
+        }
+
+        const hours = row.type === '8H' ? 8 : 5;
+        const note = row.type === '8H' ? '8 Saat Tam Gün' : '5 Saat Mesai';
+        
+        const entry: PuantajEntry = {
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${Math.random().toString(36).substr(2, 5)}`,
+          userId: row.userId,
+          type: row.type as '5H' | '8H',
+          amount,
+          hours,
+          date: selectedDate,
+          note
+        };
+        await db.upsertEntry(entry);
+        newEntries.push(entry);
+      }
+      setEntries(prev => [...prev, ...newEntries]);
+      setDraftRows([]);
+      setSuccessInfo(`${newEntries.length} adet yövmiye başarıyla eklendi!`);
+      setTimeout(() => setSuccessInfo(null), 3000);
+    } catch (err: any) {
+      setErrorInfo("Toplu kayıt hatası: " + err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const calculateDailyTotal = () => {
+    return todaysEntries
+      .filter(e => {
+        const user = users.find(u => u.id === e.userId);
+        return e.amount > 0 && user?.role !== UserRole.BOSS && !e.excludeFromTotals;
+      })
+      .reduce((acc, curr) => acc + curr.amount, 0);
+  };
+
+  const syncToAdisyo = async (department: 'NORMAL' | 'KITCHEN') => {
+    const total = todaysEntries
+      .filter(e => {
+        const user = users.find(u => u.id === e.userId);
+        const isUserKitchen = user?.department === 'KITCHEN';
+        return e.amount > 0 && user?.role !== UserRole.BOSS && (department === 'KITCHEN' ? isUserKitchen : !isUserKitchen) && !e.excludeFromTotals;
+      })
+      .reduce((acc, curr) => acc + curr.amount, 0);
+
+    if (total <= 0) {
+      setErrorInfo(`${department === 'KITCHEN' ? 'Mutfak' : 'Personel'} için aktarılacak tutar bulunamadı.`);
+      return;
+    }
+
+    console.log(`Syncing ${department} to Adisyo. Total: ${total}`);
+    setBusy(true);
+    setAdisyoDebug(null);
+    try {
+      const expenseTypeId = department === 'KITCHEN' ? 50691 : 52364;
+      console.log(`Using expenseTypeId: ${expenseTypeId}`);
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0]; // HH:mm:ss
+      const expenseDate = `${selectedDate}T${timeStr}`;
+      const note = `${formatDisplayDate(selectedDate)} - ${department === 'KITCHEN' ? 'Mutfak ' : ''}Personel Puantaj Aktarımı`;
+      
+      // Shift ID is not used anymore as per user request to remove shift tracking
+      const shiftId = 0;
+
+      const result = await adisyoService.saveExpense({
+        expenseTypeId,
+        amount: total,
+        note,
+        expenseDate,
+        shiftId
+      });
+      
+      console.log("Adisyo Result:", result);
+      setSuccessInfo(`${department === 'KITCHEN' ? 'Mutfak' : 'Personel'} maliyeti (${total} TL) Adisyo'ya başarıyla aktarıldı! ✨`);
+      setTimeout(() => setSuccessInfo(null), 5000);
+    } catch (err: any) {
+      console.error("Adisyo Sync Error Details:", err);
+      const msg = err.message || JSON.stringify(err);
+      setErrorInfo(`Adisyo Aktarım Hatası: ${msg}`);
+      setAdisyoDebug(msg);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const todaysEntries = entries.filter(e => e.date === selectedDate);
+  const showHoursInModal = modal.type === 'CUSTOM';
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500 max-w-[1400px] mx-auto relative">
+      {deleteConfirmId && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-[9999] flex items-center justify-center p-6 animate-in fade-in">
+          <div className="bg-white rounded-[2.5rem] p-8 max-sm w-full text-center shadow-2xl animate-in zoom-in-95 border border-slate-100">
+            <div className="bg-orange-50 w-16 h-16 rounded-3xl flex items-center justify-center mx-auto mb-6">
+              <AlertTriangle className="text-orange-500 w-8 h-8" />
+            </div>
+            <h3 className="text-xl font-black text-slate-800 mb-2">Kayıt Silinecek</h3>
+            <p className="text-slate-500 text-xs font-bold mb-8 uppercase tracking-wider">Silmek istediğine emin misin?</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => executeDelete(deleteConfirmId)} disabled={busy} className="bg-red-600 text-white py-4 rounded-2xl font-black hover:bg-red-700 transition-all text-xs uppercase tracking-widest">SİL</button>
+              <button onClick={() => setDeleteConfirmId(null)} className="bg-slate-100 text-slate-500 py-4 rounded-2xl font-black hover:bg-slate-200 transition-all text-xs uppercase tracking-widest">İPTAL</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {errorInfo && (
+        <div className="bg-red-50 border-2 border-red-100 p-8 rounded-[2.5rem] animate-in fade-in slide-in-from-top-4 shadow-xl shadow-red-50/50">
+          <div className="flex items-start gap-4 text-red-800">
+            <AlertCircle className="w-8 h-8 shrink-0 text-red-500" />
+            <div className="flex-1">
+              <h4 className="text-lg font-black uppercase tracking-tight">Hata Oluştu!</h4>
+              <p className="text-sm font-medium mt-1 opacity-80 leading-relaxed whitespace-pre-wrap">{errorInfo}</p>
+            </div>
+            <button onClick={() => setErrorInfo(null)} className="p-2 hover:bg-red-100 rounded-full transition-colors"><X size={20} /></button>
+          </div>
+        </div>
+      )}
+
+      {successInfo && (
+        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[10000] w-full max-w-md px-6 animate-in fade-in slide-in-from-top-8 duration-500">
+          <div className="bg-emerald-600 text-white p-6 rounded-[2.5rem] shadow-2xl shadow-emerald-200/50 flex items-center gap-4 border border-emerald-500/20 backdrop-blur-md">
+            <div className="bg-white/20 p-3 rounded-2xl">
+              <CheckCircle2 className="w-6 h-6 text-white" />
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-black uppercase tracking-widest opacity-80">Başarılı!</h4>
+              <p className="text-xs font-bold leading-relaxed">{successInfo}</p>
+            </div>
+            <button onClick={() => setSuccessInfo(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-col xl:flex-row justify-between items-stretch xl:items-center gap-4">
+        <div className="flex-1 flex flex-col sm:flex-row gap-4 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+          <div className="flex items-center gap-6">
+            <div className="bg-indigo-600 p-3 rounded-2xl shadow-lg shadow-indigo-100">
+              <ClipboardList className="text-white w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-black text-slate-800 tracking-tight">Günlük Puantaj</h2>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 text-slate-400 group cursor-pointer relative">
+                  <Calendar className="w-3.5 h-3.5 text-indigo-500" />
+                  <span className="text-xs font-black text-indigo-600 hover:underline">{formatDisplayDate(selectedDate)}</span>
+                  <input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
+                </div>
+                <button 
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      const e = await db.getEntries();
+                      setEntries(e);
+                    } catch (err: any) {
+                      setErrorInfo("Yenileme hatası: " + err.message);
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                  disabled={busy}
+                  className={`p-1 rounded-md transition-all ${busy ? 'text-slate-300' : 'text-indigo-500 hover:text-indigo-700'}`}
+                  title="Puantajı Yenile"
+                >
+                  <RefreshCw size={12} className={busy ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <div className="sm:ml-auto flex flex-col gap-2">
+            <div className="flex items-center gap-4 bg-slate-900 px-6 py-3 rounded-2xl text-white">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">GÜNLÜK PERSONEL MALİYETİ:</p>
+              <p className="text-xl font-black text-indigo-400">{calculateDailyTotal().toLocaleString()} <span className="text-xs text-slate-500">TL</span></p>
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => syncToAdisyo('NORMAL')}
+                disabled={busy}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-[9px] font-black py-2 rounded-xl uppercase tracking-widest transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
+              >
+                {busy ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                Personel Adisyo
+              </button>
+              <button 
+                onClick={() => syncToAdisyo('KITCHEN')}
+                disabled={busy}
+                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white text-[9px] font-black py-2 rounded-xl uppercase tracking-widest transition-all shadow-lg shadow-orange-100 flex items-center justify-center gap-2"
+              >
+                {busy ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                Mutfak Adisyo
+              </button>
+            </div>
+            {adisyoDebug && (
+              <div className="bg-red-50 p-3 rounded-2xl border border-red-100 shadow-sm animate-in slide-in-from-top-2">
+                <p className="text-[10px] font-black text-red-600 uppercase mb-1 tracking-widest">Adisyo Debug:</p>
+                <p className="text-[9px] font-mono text-red-500 break-all leading-tight">{adisyoDebug}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex items-center gap-4">
+          <div className="p-3 bg-slate-50 rounded-xl text-slate-400"><Settings2 size={20} /></div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-indigo-500 uppercase">5K:</span>
+              <input type="number" className="pl-10 pr-3 py-2 bg-slate-50 rounded-lg outline-none font-black text-xs w-full border border-transparent focus:border-indigo-500" value={config5K} onChange={e => updateSetting('config5K', e.target.value)} />
+            </div>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-sky-500 uppercase">8K:</span>
+              <input type="number" className="pl-10 pr-3 py-2 bg-slate-50 rounded-lg outline-none font-black text-xs w-full border border-transparent focus:border-sky-500" value={config8K} onChange={e => updateSetting('config8K', e.target.value)} />
+            </div>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-emerald-500 uppercase">Şef 5K:</span>
+              <input type="number" className="pl-14 pr-3 py-2 bg-slate-50 rounded-lg outline-none font-black text-xs w-full border border-transparent focus:border-emerald-500" value={configChef5K} onChange={e => updateSetting('configChef5K', e.target.value)} />
+            </div>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-teal-500 uppercase">Şef 8K:</span>
+              <input type="number" className="pl-14 pr-3 py-2 bg-slate-50 rounded-lg outline-none font-black text-xs w-full border border-transparent focus:border-teal-500" value={configChef8K} onChange={e => updateSetting('configChef8K', e.target.value)} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Hızlı Shift Ekleme Aracı (V2 - Tap-to-Add) */}
+      <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="flex items-center gap-4">
+            <div className="bg-emerald-500 p-3 rounded-2xl shadow-lg shadow-emerald-100">
+              <UserPlus className="text-white w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-xl font-black text-slate-800 tracking-tight">Hızlı Shift Ekleme</h3>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">İsimlere dokunarak listeye ekle</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-100 w-full md:w-auto">
+            <button 
+              onClick={() => setDefaultShiftType('8H')}
+              className={`flex-1 md:flex-none px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${defaultShiftType === '8H' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-100'}`}
+            >
+              Tam Gün (5K)
+            </button>
+            <button 
+              onClick={() => setDefaultShiftType('5H')}
+              className={`flex-1 md:flex-none px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${defaultShiftType === '5H' ? 'bg-sky-500 text-white shadow-md' : 'text-slate-400 hover:bg-slate-100'}`}
+            >
+              Mesai (8K)
+            </button>
+          </div>
+        </div>
+
+        {/* Personel Havuzu */}
+        <div className="bg-slate-50/50 p-4 rounded-[2rem] border border-slate-50">
+          <div className="flex flex-wrap gap-2">
+            {users
+              .filter(u => u.role === UserRole.STAFF && u.department !== 'KITCHEN')
+              .filter(u => u.name.toLowerCase().includes(searchTerm.toLowerCase()))
+              .map(u => (
+                <button
+                  key={u.id}
+                  onClick={() => handleAddFromPool(u.id)}
+                  className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:border-emerald-500 hover:text-emerald-600 hover:shadow-sm transition-all active:scale-95 flex items-center gap-2"
+                >
+                  <div className="w-2 h-2 rounded-full bg-slate-200" />
+                  {u.name}
+                </button>
+              ))}
+            {users.filter(u => u.role !== UserRole.BOSS).filter(u => u.name.toLowerCase().includes(searchTerm.toLowerCase())).length === 0 && (
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest p-4 w-full text-center">Aradığın personel bulunamadı...</p>
+            )}
+          </div>
+        </div>
+
+        {/* Seçilenler Listesi */}
+        {draftRows.length > 0 && (
+          <div className="space-y-3 pt-4 border-t border-slate-50">
+            <div className="flex justify-between items-center px-2">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Eklenecek Kayıtlar ({draftRows.length})</h4>
+              <button 
+                onClick={handleSaveDrafts}
+                disabled={busy}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-lg shadow-emerald-100 flex items-center gap-2 disabled:opacity-50"
+              >
+                {busy ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                HEPSİNİ KAYDET
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {draftRows.map((row, idx) => {
+                const user = users.find(u => u.id === row.userId);
+                return (
+                  <div key={idx} className="flex items-center justify-between bg-white border border-slate-100 p-3 rounded-2xl shadow-sm animate-in zoom-in-95">
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-slate-800">{user?.name}</span>
+                      <div className="flex gap-2 mt-1">
+                        <button 
+                          onClick={() => handleRowChange(idx, 'type', row.type === '8H' ? '5H' : '8H')}
+                          className={`text-[8px] font-black px-1.5 py-0.5 rounded uppercase ${row.type === '8H' ? 'bg-indigo-50 text-indigo-600' : 'bg-sky-50 text-sky-600'}`}
+                        >
+                          {row.type === '8H' ? 'Tam' : 'Mesai'}
+                        </button>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => handleRemoveRow(idx)}
+                      className="p-2 text-slate-300 hover:text-red-500 transition-colors"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Personel Arama Çubuğu */}
+      <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm">
+        <div className="relative">
+          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+          <input 
+            type="text" 
+            placeholder="Personel adıyla hızlı ara..." 
+            className="w-full pl-14 pr-6 py-4 bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl outline-none font-bold text-slate-700 transition-all"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+        <div className="hidden lg:grid grid-cols-[1.5fr_1fr_2.5fr_1fr] gap-4 px-8 py-4 bg-slate-50/50 border-b border-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+          <div>Personel</div>
+          <div>Bakiye</div>
+          <div>Hızlı İşlemler</div>
+          <div>Kayıtlar</div>
+        </div>
+
+        <div className="divide-y divide-slate-50">
+          {users
+            .filter(u => u.name.toLowerCase().includes(searchTerm.toLowerCase()))
+            .map(person => {
+            const personEntries = todaysEntries.filter(e => e.userId === person.id);
+            const personDailyBalance = personEntries.reduce((acc, curr) => acc + curr.amount, 0);
+            
+            return (
+              <div key={person.id} className={`grid grid-cols-1 lg:grid-cols-[1.5fr_1fr_2.5fr_1fr] gap-4 items-center px-6 lg:px-8 py-6 transition-colors hover:bg-slate-50/50 group ${person.role === UserRole.ADMIN ? 'bg-amber-50/10' : person.role === UserRole.BOSS ? 'bg-fuchsia-50/10' : ''}`}>
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <img src={person.avatar} className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 shadow-sm" />
+                    {person.role === UserRole.ADMIN && <div className="absolute -top-1 -right-1 bg-amber-500 w-3 h-3 rounded-full border-2 border-white" />}
+                    {person.role === UserRole.BOSS && <div className="absolute -top-1 -right-1 bg-fuchsia-500 w-3 h-3 rounded-full border-2 border-white" />}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-800 text-sm truncate">{person.name}</h3>
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">
+                      {person.role === UserRole.BOSS ? 'Dükkan Sahibi' : 'Personel'}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <div className={`px-3 py-1.5 rounded-xl font-black text-[11px] min-w-[80px] text-center ${personDailyBalance > 0 ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : personDailyBalance < 0 ? 'bg-red-50 text-red-600 border-red-100' : 'bg-slate-50 text-slate-400 border border-slate-100'}`}>
+                    {personDailyBalance > 0 ? '+' : ''}{personDailyBalance.toLocaleString()} TL
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button disabled={busy} onClick={() => quickEntry(person.id, '8H', '8 Saat Tam Gün', 8)} className="w-12 h-12 flex flex-col items-center justify-center bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 shadow-sm">
+                    <span className="font-black text-xs">5K</span>
+                    <span className="text-[7px] font-black uppercase opacity-70">Tam</span>
+                  </button>
+                  <button disabled={busy} onClick={() => quickEntry(person.id, '5H', '5 Saat Mesai', 5)} className="w-12 h-12 flex flex-col items-center justify-center bg-sky-500 text-white rounded-xl hover:bg-sky-600 transition-all active:scale-95 disabled:opacity-50 shadow-sm">
+                    <span className="font-black text-xs">8K</span>
+                    <span className="text-[7px] font-black uppercase opacity-70">Mesai</span>
+                  </button>
+                  <button disabled={busy} onClick={() => openModal(person.id, 'EXPENSE')} className="w-12 h-12 flex flex-col items-center justify-center bg-orange-50 text-orange-600 border border-orange-100 rounded-xl hover:bg-orange-100 transition-all active:scale-95 disabled:opacity-50">
+                    <Coffee size={14} />
+                    <span className="text-[7px] font-black uppercase mt-0.5 tracking-tighter">Harcama</span>
+                  </button>
+                  <button disabled={busy} onClick={() => openModal(person.id, 'PAYMENT')} className="w-12 h-12 flex flex-col items-center justify-center bg-fuchsia-50 text-fuchsia-600 border border-fuchsia-100 rounded-xl hover:bg-fuchsia-100 transition-all active:scale-95 disabled:opacity-50">
+                    <Banknote size={14} />
+                    <span className="text-[7px] font-black uppercase mt-0.5 tracking-tighter">Ödeme</span>
+                  </button>
+                  <button disabled={busy} onClick={() => openModal(person.id, 'CUSTOM')} className="w-12 h-12 flex flex-col items-center justify-center bg-slate-50 text-slate-600 border border-slate-200 rounded-xl hover:bg-slate-100 transition-all active:scale-95 disabled:opacity-50">
+                    <Settings2 size={14} />
+                    <span className="text-[7px] font-black uppercase mt-0.5 tracking-tighter">Özel</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+                  {personEntries.map(entry => (
+                    <div key={entry.id} className={`group/chip relative flex items-center gap-1.5 border px-2.5 py-1 rounded-lg text-[9px] font-bold shrink-0 transition-all ${entry.excludeFromTotals ? 'opacity-50 grayscale' : ''} ${entry.amount < 0 ? 'bg-red-50/50 border-red-100 text-red-700' : 'bg-white border-slate-100 text-slate-600 hover:shadow-sm'}`}>
+                      <span className="truncate max-w-[50px]">{entry.amount.toLocaleString()}</span>
+                      {entry.excludeFromTotals && <EyeOff size={8} className="text-slate-400" />}
+                      <div className="flex items-center gap-1 opacity-0 group-hover/chip:opacity-100 transition-opacity bg-inherit pl-1 border-l border-current/10">
+                        <button disabled={busy} onClick={() => openModal(person.id, entry.type, entry)} className="hover:scale-125 transition-transform"><Edit2 size={10} /></button>
+                        <button disabled={busy} onClick={() => setDeleteConfirmId(entry.id)} className="hover:scale-125 transition-transform text-red-400 hover:text-red-600"><Trash2 size={10} /></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {modal.isOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-6 animate-in fade-in">
+          <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
+            <div className="p-8">
+              <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center gap-3">
+                  <div className={`p-3 rounded-2xl ${modal.type === 'PAYMENT' || modal.type === 'EXPENSE' ? 'bg-red-50 text-red-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                    {modal.type === 'PAYMENT' ? <HandCoins size={20} /> : modal.type === 'EXPENSE' ? <ShoppingBag size={20} /> : <Banknote size={20} />}
+                  </div>
+                  <h3 className="text-xl font-black text-slate-800 tracking-tight">{modal.title}</h3>
+                </div>
+                <button onClick={() => setModal({...modal, isOpen: false})} className="p-2 hover:bg-slate-100 rounded-full text-slate-400"><X size={24} /></button>
+              </div>
+              <div className="space-y-4">
+                <div className={`grid ${showHoursInModal ? 'grid-cols-2' : 'grid-cols-1'} gap-4`}>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Tutar (TL)</label>
+                    <input type="number" autoFocus disabled={busy} className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl outline-none font-black text-2xl transition-all" value={modal.amount} onChange={e => setModal({...modal, amount: e.target.value})} />
+                  </div>
+                  {showHoursInModal && (
+                    <div className="space-y-1">
+                      <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Saat (Opsiyonel)</label>
+                      <input type="number" disabled={busy} className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl outline-none font-black text-2xl transition-all text-indigo-400" placeholder="0" value={modal.hours} onChange={e => setModal({...modal, hours: e.target.value})} />
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-2">Not</label>
+                  <textarea disabled={busy} className="w-full px-6 py-4 bg-slate-50 border-2 border-transparent focus:border-indigo-500 focus:bg-white rounded-2xl outline-none font-bold text-slate-600 transition-all resize-none h-24 text-sm" value={modal.note} onChange={e => setModal({...modal, note: e.target.value})} />
+                </div>
+
+                {(modal.type === 'PAYMENT' || modal.type === 'CUSTOM') && (
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 cursor-pointer hover:bg-slate-100 transition-all" onClick={() => setModal({...modal, excludeFromTotals: !modal.excludeFromTotals})}>
+                    <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${modal.excludeFromTotals ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-200'}`}>
+                      {modal.excludeFromTotals && <CheckIcon size={14} />}
+                    </div>
+                    <span className="text-xs font-black text-slate-600 uppercase tracking-widest">Toplamlara Katılmasın</span>
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3 mt-8">
+                <button onClick={() => setModal({...modal, isOpen: false})} className="py-4 rounded-2xl font-black text-slate-500 bg-slate-100 text-[11px] uppercase tracking-widest">İptal</button>
+                <button disabled={busy} onClick={handleModalSubmit} className="py-4 rounded-2xl font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg text-[11px] uppercase tracking-widest flex items-center justify-center gap-2">
+                  {busy ? <RefreshCw className="w-4 h-4 animate-spin" /> : <CheckIcon className="w-4 h-4" />} Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AdminPuantaj;
